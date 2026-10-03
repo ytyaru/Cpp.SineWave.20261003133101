@@ -7,16 +7,18 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
-#include <cstring>
+#include <cstring> // std::memcpy のために必須
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/bind.h>
 #endif
 
+// 円周率マクロ M_PI が定義されていない環境向けの保険
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
+// 1. 裸の浮動小数点音声データのメモリ保持と管理だけを行うクラス
 class SoundBuffer {
 private:
     std::vector<float>* buffer; 
@@ -59,9 +61,10 @@ public:
     size_t size() const { return buffer ? buffer->size() : 0; }
 };
 
+// 2. WAVフォーマットに沿った完成済みのバイナリをメモリ上に構築・保持するクラス
 class WavFileBuffer {
 private:
-    std::vector<uint8_t>* wav_bytes; 
+    std::vector<uint8_t>* wav_bytes; // WAV全体のバイト配列ポインタ
 
     #pragma pack(push, 1)
     struct WavHeader {
@@ -79,14 +82,15 @@ private:
         char data_id[4];
         uint32_t data_size;
 
+        // C++17の古い配列割当ルールでも絶対に警告が出ないようにするコンストラクタ
         WavHeader() {
             riff_id[0] = 'R'; riff_id[1] = 'I'; riff_id[2] = 'F'; riff_id[3] = 'F';
             wave_id[0] = 'W'; wave_id[1] = 'A'; wave_id[2] = 'V'; wave_id[3] = 'E';
             fmt_id[0] = 'f';  fmt_id[1] = 'm';  fmt_id[2] = 't';  fmt_id[3] = ' ';
             fmt_size = 16;
-            audio_format = 1;     
-            num_channels = 1;     
-            bits_per_sample = 16; 
+            audio_format = 1;     // 1 = 整数リニアPCM
+            num_channels = 1;     // 1 = モノラル
+            bits_per_sample = 16; // 16bit
             data_id[0] = 'd'; data_id[1] = 'a'; data_id[2] = 't'; data_id[3] = 'a';
         }
     };
@@ -150,6 +154,7 @@ public:
     size_t size() const { return wav_bytes ? wav_bytes->size() : 0; }
 };
 
+// 3. 完成したWavFileBufferのメモリ内容をディスクに書き出すだけを行うクラス
 class WavFileWriter {
 public:
     static void save(const std::string& filename, const WavFileBuffer& wav_buf) {
@@ -169,6 +174,7 @@ public:
     }
 };
 
+// 4. 音波の数式計算だけを行うクラス
 class SoundGenerator {
 private:
     uint32_t sample_rate;
@@ -183,6 +189,7 @@ public:
 
         for (size_t i = 0; i < total_samples; ++i) {
             double time = static_cast<double>(i) / static_cast<double>(sample_rate);
+            // C++17対応: std::numbers::pi から、確実な M_PI マクロに変更
             double radian = 2.0 * M_PI * frequency * time;
             raw_ptr[i] = static_cast<float>(std::sin(radian) * volume);
         }
@@ -190,22 +197,5 @@ public:
         return sound_buf; 
     }
 };
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_BINDINGS(sound_module) {
-    emscripten::class_<SoundBuffer>("SoundBuffer")
-        .function("freeMemory", &SoundBuffer::free_memory)
-        .function("size", &SoundBuffer::size);
-
-    emscripten::class_<WavFileBuffer>("WavFileBuffer")
-        .constructor<const SoundBuffer&, uint32_t>()
-        .function("freeMemory", &WavFileBuffer::free_memory)
-        .function("size", &WavFileBuffer::size);
-
-    emscripten::class_<SoundGenerator>("SoundGenerator")
-        .constructor<uint32_t>()
-        .function("createSine", &SoundGenerator::create_sine);
-}
-#endif
 
 #endif

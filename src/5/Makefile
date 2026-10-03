@@ -2,12 +2,7 @@ CXX      := g++
 CXXFLAGS := -O3 -std=c++17 -Wall -Wextra
 TARGET   := separate_test
 
-EMCXX    := emcc
-EMFLAGS  := -O3 -std=c++17 --bind -s WASM_BIGINT
-
-all: clean wasm cli
-
-cli:
+all: clean
 	$(CXX) $(CXXFLAGS) main.cpp -o $(TARGET)
 	@echo "----------------------------------------"
 	./$(TARGET)
@@ -17,10 +12,7 @@ cli:
 	@echo "【再生】2つ目のWAV..."
 	aplay output_raii.wav
 
-wasm:
-	$(EMCXX) $(EMFLAGS) audio_lib.hpp -o sound_module.js
-
 clean:
-	rm -f $(TARGET) *.wav sound_module.js sound_module.wasm
+	rm -f $(TARGET) *.wav
 
-.PHONY: all clean cli wasm
+.PHONY: all clean
