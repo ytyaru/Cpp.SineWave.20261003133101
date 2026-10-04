@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C++ WASM Sine Wave Generator (No-Module)</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; background: #f7f9fc; color: #333; }
+        .card { background: #fff; padding: 24px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .controls-row { display: flex; gap: 10px; margin-bottom: 24px; justify-content: center; }
+        button { padding: 10px 18px; font-size: 1rem; font-weight: 600; cursor: pointer; border: none; border-radius: 6px; background-color: #2563eb; color: white; }
+        button:disabled { background-color: #94a3b8; cursor: not-allowed; }
+        .param-group { display: grid; grid-template-columns: 120px 1fr; align-items: center; margin-bottom: 14px; gap: 10px; }
+        input[type="number"] { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+        #status { margin-top: 16px; font-size: 0.85rem; text-align: center; color: #64748b; }
+        .nav-link { text-align: center; margin-top: 15px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>WASM Generator [No-Module版]</h1>
+    <div class="controls-row">
+        <button id="btn-generate" onclick="onGenerate()" disabled>サイン波を生成する</button>
+        <button id="btn-play" onclick="onPlayPause()" disabled>▶ 再生</button>
+        <button id="btn-download" onclick="onDownload()" disabled>wav ⬇</button>
+    </div>
+    <div class="param-group"><label>sample_rate:</label><input type="number" id="sample_rate" value="44100"></div>
+    <div class="param-group"><label>frequency:</label><input type="number" id="frequency" value="440.0" step="0.1"></div>
+    <div class="param-group"><label>duration:</label><input type="number" id="duration" value="3.0" step="0.1"></div>
+    <div class="param-group"><label>volume:</label><input type="number" id="volume" value="0.5" step="0.05" min="0" max="1"></div>
+    <div id="status">WASMをロード中...</div>
+
+    <div class="nav-link">
+        <a href="index-esm.html">👉 ESM 版のテストページへ移動</a>
+    </div>
+</div>
+
+<!-- 通常のscriptタグでロード -->
+<script src="audio_wasm_nomodule.js"></script>
+<script>
+    let wasmModule = null;
+    let manager = null;
+    let wavBlob = null;
+    let audioCtx = null;
+    let currentSourceNode = null;
+    let isPlaying = false;
+
+    async function init() {
+        try {
+            // No-Module版（createAudioModuleがグローバルに露出する）
+            wasmModule = await createAudioModule();
+            manager = new wasmModule.SineWaveManager();
+            document.getElementById('status').textContent = '準備完了: パラメータを設定して生成してください';
+            document.getElementById('btn-generate').disabled = false;
+        } catch (err) {
+            document.getElementById('status').textContent = 'WASM初期化エラー: ' + err.message;
+        }
+    }
+    window.addEventListener('load', init);
+
+    function updateUIState(state) {
+        const btnGen = document.getElementById('btn-generate');
+        const btnPlay = document.getElementById('btn-play');
+        const btnDl = document.getElementById('btn-download');
+
+        if (state === 'generating') {
+            btnGen.disabled = true; btnPlay.disabled = true; btnDl.disabled = true;
+        } else if (state === 'playing') {
+            btnGen.disabled = true; btnPlay.disabled = false; btnPlay.textContent = '⏸ 停止'; btnDl.disabled = true;
+        } else if (state === 'stopped_with_data' || state === 'ready') {
+            btnGen.disabled = false; btnPlay.disabled = false; btnPlay.textContent = '▶ 再生'; btnDl.disabled = false;
+        }
+    }
+
+    function onGenerate() {
+        if (!manager) return;
+        const sr = parseInt(document.getElementById('sample_rate').value);
+        const freq = parseFloat(document.getElementById('frequency').value);
+        const dur = parseFloat(document.getElementById('duration').value);
+        const vol = parseFloat(document.getElementById('volume').value);
+
+        updateUIState('generating');
+        document.getElementById('status').textContent = 'WAVデータを生成中...';
+
+        try {
+            manager.generate(sr, freq, dur, vol);
+            const dataPtr = manager.get_data();
+            const size = manager.get_size();
+            const heapBytes = new Uint8Array(wasmModule.HEAPU8.buffer, dataPtr, size);
+            wavBlob = new Blob([new Uint8Array(heapBytes)], { type: 'audio/wav' });
+
+            document.getElementById('status').textContent = `生成成功: ${size} bytes`;
+            onPlayPause(); // 要件1: 生成ボタン押下で自動再生
+        } catch (e) {
+            console.error(e);
+            document.getElementById('status').textContent = 'エラー: ' + e.message;
+            updateUIState('ready');
+        }
+    }
+
+    function onPlayPause() {
+        if (!wavBlob) return;
+        if (isPlaying) {
+            if (currentSourceNode) { currentSourceNode.stop(); currentSourceNode.disconnect(); currentSourceNode = null; }
+            isPlaying = false;
+            updateUIState('stopped_with_data');
+            document.getElementById('status').textContent = '停止しました';
+        } else {
+            playAudio();
+        }
+    }
+
+    async function playAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+        const buffer = await audioCtx.decodeAudioData(await wavBlob.arrayBuffer());
+        currentSourceNode = audioCtx.createBufferSource();
+        currentSourceNode.buffer = buffer;
+        currentSourceNode.connect(audioCtx.destination);
+        currentSourceNode.onended = () => {
+            isPlaying = false;
+            updateUIState('stopped_with_data'); // 要件3: 再生完了で生成ボタン有効化
+            document.getElementById('status').textContent = '再生完了';
+        };
+        currentSourceNode.start(0);
+        isPlaying = true;
+        updateUIState('playing'); // 要件2: 再生中は生成ボタンを無効化
+        document.getElementById('status').textContent = '再生中...';
+    }
+
+    function onDownload() {
+        if (!wavBlob) return;
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'sine_output_nomodule.wav';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+</script>
+</body>
+</html>

@@ -26,10 +26,44 @@ $(TARGET_DEBUG): debug.cpp audio_lib.hpp
 	$(CXX) $(CXXFLAGS) debug.cpp -o $(TARGET_DEBUG)
 
 # 3. WASMのビルド
-wasm: wasm_api.cpp audio_lib.hpp
-	emcc -O3 -std=c++17 --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions wasm_api.cpp -o $(TARGET_WASM)
+#wasm: wasm_api.cpp audio_lib.hpp
+#	emcc -O3 -std=c++17 --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions wasm_api.cpp -o $(TARGET_WASM)
+# 3. WASMのビルド
+#wasm: wasm_api.cpp audio_lib.hpp
+#	emcc -O3 -std=c++17 -frtti --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions wasm_api.cpp -o $(TARGET_WASM)
+# 3. WASMのビルド
+#wasm: wasm_api.cpp audio_lib.hpp
+#	em++ -O3 -std=c++17 -frtti --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions wasm_api.cpp -o $(TARGET_WASM)
+#wasm: wasm_api.cpp audio_lib.hpp
+#	em++ -O3 -std=c++17 -frtti --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions -sMODULARIZE=1 -sEXPORT_NAME='createAudioModule' wasm_api.cpp -o $(TARGET_WASM)
+
+# 3. WASM一括ビルド
+wasm: audio_wasm_esm.js audio_wasm_nomodule.js
+
+# 3-1. ESM 版のビルド (-sMODULARIZE=1 -sEXPORT_ES6=1)
+#audio_wasm_esm.js: wasm_api.cpp audio_lib.hpp
+#	em++ -O3 -std=c++17 -frtti --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions \
+#		-sMODULARIZE=1 -sEXPORT_ES6=1 wasm_api.cpp -o audio_wasm_esm.js
+# 1. ESM 版のビルド (-sEXPORTED_RUNTIME_METHODS を追加)
+audio_wasm_esm.js: wasm_api.cpp audio_lib.hpp
+	em++ -O3 -std=c++17 -frtti --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions \
+		-sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORTED_RUNTIME_METHODS=['HEAPU8'] \
+		wasm_api.cpp -o audio_wasm_esm.js
+
+# 3-2. Classic (No-Module) 版のビルド (-sMODULARIZE=1 -sEXPORT_NAME='createAudioModule')
+#audio_wasm_nomodule.js: wasm_api.cpp audio_lib.hpp
+#	em++ -O3 -std=c++17 -frtti --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions \
+#		-sMODULARIZE=1 -sEXPORT_NAME='createAudioModule' wasm_api.cpp -o audio_wasm_nomodule.js
+# 2. Classic (No-Module) 版のビルド (-sEXPORTED_RUNTIME_METHODS を追加)
+audio_wasm_nomodule.js: wasm_api.cpp audio_lib.hpp
+	em++ -O3 -std=c++17 -frtti --bind -s ALLOW_MEMORY_GROWTH=1 -fexceptions \
+		-sMODULARIZE=1 -sEXPORT_NAME='createAudioModule' -sEXPORTED_RUNTIME_METHODS=['HEAPU8'] \
+		wasm_api.cpp -o audio_wasm_nomodule.js
 
 clean:
-	rm -f $(TARGET_CLI) $(TARGET_DEBUG) *.wav audio_wasm.js audio_wasm.wasm
+	rm -f $(TARGET_CLI) $(TARGET_DEBUG) *.wav audio_wasm*.js audio_wasm*.wasm
+
+#clean:
+#	rm -f $(TARGET_CLI) $(TARGET_DEBUG) *.wav audio_wasm.js audio_wasm.wasm
 
 .PHONY: all wasm clean
