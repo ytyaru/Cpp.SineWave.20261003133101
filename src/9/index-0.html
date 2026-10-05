@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C++ WASM Sine Wave Generator</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 500px;
+            margin: 40px auto;
+            padding: 20px;
+            background-color: #f7f9fc;
+            color: #333;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .card {
+            background: #fff;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .controls-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 18px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            background-color: #2563eb;
+            color: white;
+            transition: background-color 0.2s, opacity 0.2s;
+        }
+        button:hover:not(:disabled) {
+            background-color: #1d4ed8;
+        }
+        button:disabled {
+            background-color: #94a3b8;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        .param-group {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            align-items: center;
+            margin-bottom: 14px;
+            gap: 10px;
+        }
+        label {
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+        input[type="number"] {
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 1rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            box-sizing: border-box;
+        }
+        #status {
+            margin-top: 16px;
+            font-size: 0.85rem;
+            text-align: center;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>C++ WAV / WASM Generator</h1>
+    
+    <div class="controls-row">
+        <button id="btn-generate" onclick="onGenerate()">サイン波を生成する</button>
+        <button id="btn-play" onclick="onPlayPause()" disabled>▶ 再生</button>
+        <button id="btn-download" onclick="onDownload()" disabled>wav ⬇</button>
+    </div>
+
+    <div class="param-group">
+        <label for="sample_rate">sample_rate:</label>
+        <input type="number" id="sample_rate" value="44100" step="1">
+    </div>
+    <div class="param-group">
+        <label for="frequency">frequency:</label>
+        <input type="number" id="frequency" value="440.0" step="0.1">
+    </div>
+    <div class="param-group">
+        <label for="duration">duration:</label>
+        <input type="number" id="duration" value="3.0" step="0.1">
+    </div>
+    <div class="param-group">
+        <label for="volume">volume:</label>
+        <input type="number" id="volume" value="0.5" step="0.05" min="0" max="1">
+    </div>
+
+    <div id="status">WASMをロード中...</div>
+</div>
+
+<!-- Emscripten が生成したJSの読み込み -->
+<script src="audio_wasm.js"></script>
+<script>
+    let wasmModule = null;
+    let manager = null;
+    let wavBlob = null;
+    let audioCtx = null;
+    let currentSourceNode = null;
+    let isPlaying = false;
+
+    // Emscriptenモジュールの初期化
+    Module().then(instance => {
+        wasmModule = instance;
+        manager = new wasmModule.SineWaveManager();
+        document.getElementById('status').textContent = '準備完了: パラメータを設定して生成してください';
+    });
+
+    // 状態管理＆ボタン制御の反映
+    function updateUIState(state) {
+        const btnGen = document.getElementById('btn-generate');
+        const btnPlay = document.getElementById('btn-play');
+        const btnDl = document.getElementById('btn-download');
+
+        if (state === 'generating') {
+            btnGen.disabled = true;
+            btnPlay.disabled = true;
+            btnDl.disabled = true;
+        } else if (state === 'playing') {
+            btnGen.disabled = true;   // 要件2: 再生中は生成ボタンをdisable
+            btnPlay.disabled = false;
+            btnPlay.textContent = '⏸ 停止';
+            btnDl.disabled = true;
+        } else if (state === 'stopped_with_data') {
+            btnGen.disabled = false;  // 要件3: 再生完了時は生成ボタンをenabledに戻す
+            btnPlay.disabled = false;
+            btnPlay.textContent = '▶ 再生';
+            btnDl.disabled = false;
+        } else if (state === 'ready') {
+            btnGen.disabled = false;
+            btnPlay.disabled = false;
+            btnPlay.textContent = '▶ 再生';
+            btnDl.disabled = false;
+        }
+    }
+
+    // [サイン波を生成する] 押下時の処理 (要件1の自動再生対応)
+    function onGenerate() {
+        if (!manager) return;
+
+        const sampleRate = parseInt(document.getElementById('sample_rate').value);
+        const frequency = parseFloat(document.getElementById('frequency').value);
+        const duration = parseFloat(document.getElementById('duration').value);
+        const volume = parseFloat(document.getElementById('volume').value);
+
+        updateUIState('generating');
+        document.getElementById('status').textContent = 'C++側でWAVデータを生成中...';
+
+        try {
+            // C++の SineWaveManager を使ってメモリ上にWAVをビルド
+            manager.generate(sampleRate, frequency, duration, volume);
+            
+            const dataPtr = manager.get_data();
+            const size = manager.get_size();
+
+        // WASM上のヒープからJavaScript側へデータをコピー
+            const heapBytes = new Uint8Array(wasmModule.HEAPU8.buffer, dataPtr, size);
+            const wavBufferCopy = new Uint8Array(heapBytes);
+
+            wavBlob = new Blob([wavBufferCopy], { type: 'audio/wav' });
+
+            document.getElementById('status').textContent = `生成成功: ${size} bytes`;
+            
+            // 要件1: 生成ボタンを押下すると自動で再生ボタンが押下され再生される
+            onPlayPause();
+
+        } catch (e) {
+            console.error(e);
+            document.getElementById('status').textContent = 'エラーが発生しました: ' + e.message;
+            updateUIState('ready');
+        }
+    }
+
+    // [▶|⏸] 再生・停止ボタンの処理
+    function onPlayPause() {
+        if (!wavBlob) return;
+
+        if (isPlaying) {
+            stopAudio();
+        } else {
+            playAudio();
+        }
+    }
+
+    async function playAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
+
+        const arrayBuffer = await wavBlob.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+        currentSourceNode = audioCtx.createBufferSource();
+        currentSourceNode.buffer = audioBuffer;
+        currentSourceNode.connect(audioCtx.destination);
+
+        // 再生終了時のコールバック (要件3: 再生が完了したら生成ボタンをenabledにする)
+        currentSourceNode.onended = () => {
+            isPlaying = false;
+            updateUIState('stopped_with_data');
+            document.getElementById('status').textContent = '再生が完了しました';
+        };
+
+        currentSourceNode.start(0);
+        isPlaying = true;
+        updateUIState('playing');
+        document.getElementById('status').textContent = '再生中...';
+    }
+
+    function stopAudio() {
+        if (currentSourceNode) {
+            try { currentSourceNode.stop(); } catch(e) {}
+            currentSourceNode.disconnect();
+            currentSourceNode = null;
+        }
+        isPlaying = false;
+        updateUIState('stopped_with_data');
+        document.getElementById('status').textContent = '停止しました';
+    }
+
+    // [wav⬇] ダウンロードボタンの処理
+    function onDownload() {
+        if (!wavBlob) return;
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'sine_output.wav';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+</script>
+
+</body>
+</html>
