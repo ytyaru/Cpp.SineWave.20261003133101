@@ -25,75 +25,69 @@ public:
     SoundBuffer() = default;
     explicit SoundBuffer(size_t total_samples) : buffer(total_samples) {}
 
+    // 以下の operator[] を追加
+    float& operator[](size_t index) { return buffer[index]; }
+    const float& operator[](size_t index) const { return buffer[index]; }
+
     float* data() { return buffer.data(); }
     const float* data() const { return buffer.data(); }
     size_t size() const { return buffer.size(); }
     bool empty() const { return buffer.empty(); }
 };
-
 class WavFileBuffer {
 private:
-    std::vector<uint8_t> wav_bytes;
-
     #pragma pack(push, 1)
     struct WavHeader {
-        char riff_id[4];
+        char riff_id[4] = {'R', 'I', 'F', 'F'};
         uint32_t file_size;
-        char wave_id[4];
-        char fmt_id[4];
-        uint32_t fmt_size;
-        uint16_t audio_format;
-        uint16_t num_channels;
+        char wav_id[4] = {'W', 'A', 'V', 'E'};
+        char fmt_id[4] = {'f', 'm', 't', ' '};
+        uint32_t fmt_size = 16;
+        uint16_t audio_format = 1;
+        uint16_t num_channels = 1;
         uint32_t sample_rate;
         uint32_t byte_rate;
         uint16_t block_align;
-        uint16_t bits_per_sample;
-        char data_id[4];
+        uint16_t bits_per_sample = 16;
+        char data_id[4] = {'d', 'a', 't', 'a'};
         uint32_t data_size;
-
-        WavHeader() {
-            riff_id[0] = 'R'; riff_id[1] = 'I'; riff_id[2] = 'F'; riff_id[3] = 'F';
-            wave_id[0] = 'W'; wave_id[1] = 'A'; wave_id[2] = 'V'; wave_id[3] = 'E';
-            fmt_id[0] = 'f';  fmt_id[1] = 'm';  fmt_id[2] = 't';  fmt_id[3] = ' ';
-            fmt_size = 16;
-            audio_format = 1;
-            num_channels = 1;
-            bits_per_sample = 16;
-            data_id[0] = 'd'; data_id[1] = 'a'; data_id[2] = 't'; data_id[3] = 'a';
-        }
     };
     #pragma pack(pop)
+
+    std::vector<uint8_t> binary_data;
 
 public:
     WavFileBuffer() = default;
 
     WavFileBuffer(const SoundBuffer& sound_buf, uint32_t sample_rate) {
-        size_t data_size_bytes = sound_buf.size() * sizeof(int16_t);
-        size_t total_file_size_bytes = sizeof(WavHeader) + data_size_bytes;
-
-        wav_bytes.resize(total_file_size_bytes);
-
+        uint32_t data_size_bytes = static_cast<uint32_t>(sound_buf.size() * sizeof(int16_t));
+        
         WavHeader header;
         header.sample_rate = sample_rate;
-        header.data_size = static_cast<uint32_t>(data_size_bytes);
-        header.file_size = header.data_size + 36;
-        header.block_align = static_cast<uint16_t>(header.num_channels * (header.bits_per_sample / 8));
-        header.byte_rate = header.sample_rate * header.block_align;
+        header.data_size = data_size_bytes;
+        header.file_size = sizeof(WavHeader) + data_size_bytes - 8;
+        header.byte_rate = sample_rate * 1 * (16 / 8);
+        header.block_align = 1 * (16 / 8);
 
-        uint8_t* head_ptr = wav_bytes.data();
-        std::memcpy(head_ptr, &header, sizeof(WavHeader));
+        binary_data.resize(sizeof(WavHeader) + data_size_bytes);
+        std::memcpy(binary_data.data(), &header, sizeof(WavHeader));
 
-        int16_t* pcm_ptr = reinterpret_cast<int16_t*>(head_ptr + sizeof(WavHeader));
-        const float* raw_data = sound_buf.data();
-
+        int16_t* pcm_ptr = reinterpret_cast<int16_t*>(binary_data.data() + sizeof(WavHeader));
         for (size_t i = 0; i < sound_buf.size(); ++i) {
-            pcm_ptr[i] = static_cast<int16_t>(raw_data[i] * 32767.0f);
+            float sample = sound_buf[i];
+            if (sample > 1.0f) sample = 1.0f;
+            if (sample < -1.0f) sample = -1.0f;
+            pcm_ptr[i] = static_cast<int16_t>(sample * 32767.0f);
         }
     }
 
-    const uint8_t* data() const { return wav_bytes.data(); }
-    size_t size() const { return wav_bytes.size(); }
-    bool empty() const { return wav_bytes.empty(); }
+    // cli.cpp が呼び出している empty() メソッドを復元
+    bool empty() const {
+        return binary_data.empty();
+    }
+
+    const uint8_t* data() const { return binary_data.data(); }
+    size_t size() const { return binary_data.size(); }
 };
 
 class SoundGenerator {
