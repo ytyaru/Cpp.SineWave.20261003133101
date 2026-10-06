@@ -162,26 +162,8 @@
         document.getElementById('status').textContent = 'WAVデータを生成中...';
 
         try {
-            /*
-            manager.generate(sr, freq, dur, vol);
-            const dataPtr = manager.get_data();
-            const size = manager.get_size();
-            const heapBytes = new Uint8Array(wasmModule.HEAPU8.buffer, dataPtr, size);
-            wavBlob = new Blob([new Uint8Array(heapBytes)], { type: 'audio/wav' });
-            */
-            /*
-            // C++ から直接 Uint8Array が返ってくる！
-            manager.generate(sr, freq, dur, vol);
-            const uint8Array = manager.get_uint8_array();
+            const uint8Array = manager.generate(sr, freq, dur, vol);
             wavBlob = new Blob([uint8Array], { type: 'audio/wav' });
-            const size = uint8Array.byteLength;
-            wavBlob = new Blob([new Uint8Array(heapBytes)], { type: 'audio/wav' });
-            */
-            //wavBlob = new Blob([manager.generate(sr, freq, dur, vol)], { type: 'audio/wav' });
-            const uint8Array = manager.get_uint8_array();
-            wavBlob = new Blob([manager.generate(sr, freq, dur, vol)], { type: 'audio/wav' });
-
-//            document.getElementById('status').textContent = `生成成功: ${size} bytes`;
             document.getElementById('status').textContent = `生成成功: ${uint8Array.byteLength} bytes`;
             window.onPlayPause(); // 要件1: 生成ボタン押下で自動再生
         } catch (e) {
